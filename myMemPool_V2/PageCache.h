@@ -8,9 +8,6 @@ public:
 		size_t numPages;
 		Span* next;
 
-		//
-		size_t blockCount_ = 0;
-		size_t freeCount_ = 0;
 	};
 	static const size_t PAGE_SIZE = 4096;
 	static PageCache& getInstance() {

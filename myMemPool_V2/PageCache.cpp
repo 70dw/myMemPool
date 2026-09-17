@@ -82,7 +82,6 @@ void PageCache::deallocateSpan(void* ptr, size_t numPages) {
 		if (!found)break;
 		span->numPages += newPages;
 		endAddr += newPages * PAGE_SIZE;
-		//eraseSpanList(cur->second);
 	}
 
 	auto currentIt = it;
@@ -139,20 +138,3 @@ void PageCache::deallocateSpan(void* ptr, size_t numPages) {
 void* PageCache::systemAlloc(size_t numPages) {
 	return operator new(numPages * PAGE_SIZE);
 }
-
-//void PageCache::eraseSpanList(Span* span) {
-//	if (!freeSpans_.count(span->numPages))return;
-//	auto head = freeSpans_[span->numPages];
-//	if (head == span) {
-//		if (span->next)freeSpans_[span->numPages] = span->next;
-//		else freeSpans_.erase(span->numPages);
-//		delete span;
-//		return;
-//	}
-//	while (head->next && head->next != span)head = head->next;
-//	if (head->next) {
-//		Span* aim = head->next;
-//		head->next = aim->next;
-//		delete aim;
-//	}
-//}

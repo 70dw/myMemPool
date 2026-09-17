@@ -3,6 +3,7 @@
 #include"PageCache.h"
 #include<map>
 #include<chrono>
+#include<vector>
 #include <algorithm>
 struct SpanTracker { //沟通中央缓存和线程缓存
 	std::atomic<void*>spanAddr{ nullptr }; //申请页的首地址
@@ -27,7 +28,7 @@ private:
 
 	SpanTracker* getSpanTracker(void* blockAddr);
 
-	void updateSpanFreeCount(SpanTracker* tracker, size_t newFreeBlocks, size_t index);
+	void returnToPageCache(SpanTracker* tracker, size_t index);
 
 private:
 	std::mutex mutexForTracker_;
@@ -38,13 +39,6 @@ private:
 	std::map<uintptr_t,SpanTracker>spanTrackers_;
 	std::atomic<size_t>spanCount_{ 0 };
 
-	static const size_t MAX_DELAY_COUNT = 48;
-	std::array<std::atomic<size_t>, FREE_LIST_SIZE>delayCounts_;
-	std::array<std::chrono::steady_clock::time_point, FREE_LIST_SIZE>lastReturnTimes_;
-	static const std::chrono::milliseconds DELAY_INTERVAL;
-
-	bool shouldPerformDelayedReturn(size_t index, size_t currentCount, std::chrono::steady_clock::time_point currentTime);
-	void performDelayedReturn(size_t index);
 	size_t getBatchSize(size_t index)
 	{
 		constexpr size_t targetBytes = 16 * 1024;

@@ -1,6 +1,7 @@
 #include"ThreadCache.h"
 #include"CentralCache.h"
 #include<cassert>
+#include<vector>
 void* ThreadCache::allocate(size_t size) {
 	if (size > MAX_BYTES)return operator new(size);
 	if (size == 0)size = ALIGNMENT;
@@ -27,7 +28,7 @@ void ThreadCache::deallocate(void* ptr, size_t size) {
 	freeList_[index] = ptr;
 	++freeListSize_[index];
 
-	if (shouldReturnToCentralCache(index)) {         //当freelist中有很多块时才归还
+	if (shouldReturnToCentralCache(index)) {         //当freelist中空间达到阈值时才归还
 		returnToCentralCache(freeList_[index], index);
 	}
 }
@@ -39,7 +40,7 @@ bool ThreadCache::shouldReturnToCentralCache(size_t index) {
 }
 
 void* ThreadCache::fetchFromCentralCache(size_t index) {
-	auto [result, giveNum] = CentralCache::getInstance().fetchRange(index);//认为返回的是一块 之后需要优化成批量fetch
+	auto [result, giveNum] = CentralCache::getInstance().fetchRange(index);
 	if (giveNum > 1) {
 		void* next = *reinterpret_cast<void**>(result);
 		*reinterpret_cast<void**>(result) = nullptr;
@@ -56,8 +57,9 @@ void ThreadCache::returnToCentralCache(void* start, size_t index) { //把一部分留
 	size_t batchNum = freeListSize_[index];
 	if (batchNum <= 1)return;
 
-	size_t keepNum = std::max(batchNum / 4, size_t(1));
-	size_t returnNum = batchNum - keepNum;
+	size_t keepTarget = std::max(batchNum / 4, size_t(1));
+	size_t returnNum = std::min(size_t(512), batchNum - keepTarget);  //减少独占锁的时间
+	size_t keepNum = batchNum - returnNum;
 
 	char* current = static_cast<char*>(start);
 
@@ -74,5 +76,47 @@ void ThreadCache::returnToCentralCache(void* start, size_t index) { //把一部分留
 	freeListSize_[index] = keepNum;
 	if (returnNum > 0 && nextNode) {
 		CentralCache::getInstance().returnRange(nextNode, returnNum, index);
+	}
+}
+template<typename T, typename ...Args>
+T* newElement(Args&& ...args) {
+	void* p = allocate(sizeof(T));
+	if (!p) {
+		throw std::logic_error("new room fail!");
+	}
+	new(p) T(std::forward<Args>(args)...);
+	return p;
+}
+template<typename T>
+void delElement(T* ptr) {
+	if (!ptr) {
+		throw std::logic_error("delete nullptr!");
+	}
+	T p = *ptr;
+	~p();
+	deallocate(reinterpret_cast<void*>(ptr), sizeof(T));
+}
+ThreadCache::~ThreadCache() noexcept{
+	for (size_t index = 0;index < FREE_LIST_SIZE;++index){
+		void* head = freeList_[index];
+		const size_t count = freeListSize_[index];
+
+		if (!head){
+			assert(count == 0);
+			continue;
+		}
+
+		assert(count > 0);
+
+		// 先解除 ThreadCache 对链表的持有
+		freeList_[index] = nullptr;
+		freeListSize_[index] = 0;
+
+		try{
+			CentralCache::getInstance().returnRange(head, count, index);
+		}
+		catch (...){
+			std::terminate();
+		}
 	}
 }
