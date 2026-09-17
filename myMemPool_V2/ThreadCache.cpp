@@ -3,10 +3,18 @@
 #include<cassert>
 #include<vector>
 void* ThreadCache::allocate(size_t size) {
+	++operatorCount_;
+	if (!(operatorCount_ & clearCount_)) {
+		checkSize();
+	}
 	if (size > MAX_BYTES)return operator new(size);
 	if (size == 0)size = ALIGNMENT;
 	size_t index = SizeClass::getIndex(size);
-
+	LastOperator_[index] = operatorCount_;
+	if (!used[index]) {
+		used[index] = 1;
+		usedIndex.push_back(index);
+	}
 	if (void* ptr = freeList_[index]) {
 		freeList_[index] = *reinterpret_cast<void**>(ptr);
 		freeListSize_[index]--;
@@ -23,20 +31,19 @@ void ThreadCache::deallocate(void* ptr, size_t size) {
 		return;
 	}
 	size_t index = SizeClass::getIndex(size);
-
 	*reinterpret_cast<void**>(ptr) = freeList_[index];
 	freeList_[index] = ptr;
 	++freeListSize_[index];
 
-	if (shouldReturnToCentralCache(index)) {         //当freelist中空间达到阈值时才归还
+	if (shouldReturnToCentralCache(index)) {         //当freelist中空间达到阈值时才归还 且增大maxSize
+		maxListSize_[index] *= 2;
 		returnToCentralCache(freeList_[index], index);
 	}
 }
 
 bool ThreadCache::shouldReturnToCentralCache(size_t index) {
-	constexpr size_t maxCacheBytes = 256 * 1024;
 	const size_t blockSize = (index + 1) * ALIGNMENT;
-	return freeListSize_[index] > maxCacheBytes / blockSize;
+	return freeListSize_[index] > maxListSize_[index];
 }
 
 void* ThreadCache::fetchFromCentralCache(size_t index) {
@@ -117,6 +124,17 @@ ThreadCache::~ThreadCache() noexcept{
 		}
 		catch (...){
 			std::terminate();
+		}
+	}
+}
+
+void ThreadCache::checkSize() {
+	for (size_t& i : usedIndex) {
+		if (operatorCount_ - LastOperator_[i] >= INTERVAL && maxListSize_[i] * (i + 1) > 32 * 1024) {
+			maxListSize_[i] /= 2;
+			while (freeListSize_[i] > maxListSize_[i]) {
+				returnToCentralCache(freeList_[i], i);
+			}
 		}
 	}
 }
